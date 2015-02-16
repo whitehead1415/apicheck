@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings, DeriveGeneric #-}
 {-# LANGUAGE FlexibleInstances, TypeSynonymInstances #-}
 
+import Prelude hiding (read)
 import Test.QuickCheck
 import Network.Wreq
 import Control.Monad
@@ -8,6 +9,7 @@ import Control.Applicative
 import Control.Lens hiding (elements)
 import Data.Aeson
 import GHC.Generics
+import Data.Either
 
 --Models
 
@@ -27,14 +29,14 @@ instance FromJSON Password
 instance ToJSON Password
 
 data Resp a = Resp a
-            | JsonError {error :: String, code :: Int} 
+            | JsonError {error :: String} 
             | DecodingError
               deriving (Show)
 
 instance (FromJSON a) => FromJSON (Resp a) where
   parseJSON obj@(Object v) =
     Resp <$> parseJSON obj
-    <|> JsonError <$> v .: "error" <*> v .: "code"
+    <|> JsonError <$> v .: "error"
     <|> pure DecodingError 
               
 data User = User { userName :: Name
@@ -42,7 +44,10 @@ data User = User { userName :: Name
                  , userPass :: Password
                  } deriving (Show, Generic)
 
-data JsonMsg = JsonMsg { msg :: String } deriving (Show)
+data JsonMsg = JsonMsg { msg :: String } deriving (Show, Generic)
+
+instance FromJSON JsonMsg
+instance ToJSON JsonMsg
 
 instance FromJSON User
 instance ToJSON User
@@ -50,14 +55,7 @@ instance ToJSON User
 data Valid a = Valid a deriving (Show)
 data Invalid a = Invalid a deriving (Show)
 
-class CRUD a where
-  create :: a -> IO (Response (Resp a))
-  --read :: IO (Response (Resp a))
-  --update :: IO (Response (Resp JsonMsg))
-  --delete :: IO (Response (Resp JsonMsg))
-
-instance CRUD User where
-  create user = asJSON =<< post "http://localhost:3000/api/users" (toJSON user)
+newtype Tester a = Tester a
 
 -- Generators
 
@@ -92,16 +90,37 @@ instance Variant User where
   valid = liftM3 User valid valid valid
   invalid = liftM3 User invalid invalid invalid
 
-instance (Variant a) => Arbitrary (Valid a) where
-  arbitrary = liftM Valid valid
+instance (Variant a, CRUD a) => Arbitrary (Tester a) where
+  arbitrary = liftM Tester $ frequency [(1, valid)]
 
-instance (Variant a) => Arbitrary (Invalid a) where
-  arbitrary = liftM Invalid invalid
+--instance (Variant a) => Arbitrary (Valid a) where
+  --arbitrary = liftM Valid valid
+
+--instance (Variant a) => Arbitrary (Invalid a) where
+  --arbitrary = liftM Invalid invalid
+
+--instance (Variant a) => Arbitrary a where
+  --arbitrary = frequency [(8, valid), (2, invalid)]
+
+--instance Arbitrary User where
+  --arbitrary = frequency [(8, valid . create), (2, invalid)]
+
+class CRUD a where
+  create :: a -> IO (Response (Resp a))
+  --read :: Gen -> String -> IO (Response (Resp a))
+  --list :: Gen -> IO (Response (Resp [a]))
+  --update :: Gen a -> String -> IO (Response (Resp a))
+  --del :: Gen -> a -> String -> IO (Response (Resp JsonMsg))
+
+apiEndPoint = "http://localhost:3000/api/users"
+
+instance CRUD User where
+  create user = asJSON =<< post apiEndPoint (toJSON user)
+  --read id = asJSON =<< get (apiEndPoint ++ id)
+  --list = asJSON =<< get apiEndPoint
+  --update user id = asJSON =<< put (apiEndPoint ++ id) (toJSON user)
+  --del user id = asJSON =<< delete (apiEndPoint ++ id)
 
 -- Properties
 
-prop_foo :: Invalid User -> Bool
-prop_foo user = True
-
-main = do
-  putStrLn "FOO"
+main = putStrLn "FOO"
